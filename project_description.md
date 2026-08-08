@@ -83,16 +83,3 @@ erDiagram
 
 *   L'authentification s'appuie sur une fonction stockée nativement dans la base de données (**RPC Supabase**) nommée `verify_user_password`. Cette fonction compare le mot de passe hashé en base à l'aide de l'extension PostgreSQL `pgcrypto`.
 *   **Mécanisme de secours (Fallback) :** En cas d'absence de la fonction RPC sur la base de données de test, l'application intègre une authentification locale simplifiée permettant de valider les comptes par défaut (`issam` / `employee`).
-
----
-
-## 🚀 Démarrage Rapide (Développement)
-
-Pour lancer le serveur de développement local :
-
-```bash
-npm install
-npm run dev
-```
-
-Ouvrez ensuite [http://localhost:3000](http://localhost:3000) dans votre navigateur.
