@@ -29,3 +29,12 @@
 - [x] Affichage en rouge des lignes d'Activité Récente en alerte
 - [x] Fenêtre modale de détails chronologiques des activations (au clic sur l'historique)
 - [x] Second widget de chiffre d'affaires filtré par période
+
+## Correctif — flux session
+- [ ] Choisir un service ne fait plus disparaître le panneau du poste
+- [ ] Le bouton "Démarrer la session" crée bien une ligne `wash_sessions` en `active`
+- [ ] Le panneau "session active" reste visible et affiche le statut Kärcher en temps réel
+- [ ] Le bouton "Terminer la session" est visible tant que `status = 'active'`
+- [ ] Terminer la session met bien `status = 'completed'` et `completed_at`
+- [ ] Aucune entrée n'apparaît dans l'historique/dashboard avant démarrage explicite de la session
+- [ ] Poste 3 suit le même flux (démarrer / panneau actif / terminer), sans sélection d'aspirateur
