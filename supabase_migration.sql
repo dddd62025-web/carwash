@@ -367,25 +367,3 @@ GRANT EXECUTE ON FUNCTION end_activation(UUID) TO public;
 GRANT EXECUTE ON FUNCTION heartbeat_activation(UUID) TO public;
 GRANT EXECUTE ON FUNCTION expire_stuck_locks() TO public;
 GRANT EXECUTE ON FUNCTION acknowledge_alert(UUID) TO public;
-
--- 7. Insertion des Données de Référence (Seeds)
--- Rétablir les 5 prestations de lavage standard
-INSERT INTO services (id, name, price)
-VALUES
-    (1, 'Lavage extérieur', 10.00),
-    (2, 'Lavage intérieur', 15.00),
-    (3, 'Lavage moteur', 20.00),
-    (4, 'Lavage vapeur', 25.00),
-    (5, 'Vidange', 50.00)
-ON CONFLICT (id) DO NOTHING;
-
--- Rétablir les comptes opérateurs (avec hachage de mot de passe crypté pgcrypto)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-INSERT INTO app_users (id, name, role, password_hash)
-VALUES
-    ('11111111-1111-1111-1111-111111111111', 'Kais', 'employee', crypt('employee123', gen_salt('bf'))),
-    ('22222222-2222-2222-2222-222222222222', 'Amine', 'employee', crypt('employee123', gen_salt('bf'))),
-    ('44444444-4444-4444-4444-444444444444', 'Issam', 'owner', crypt('issam123', gen_salt('bf')))
-ON CONFLICT (id) DO NOTHING;
-
