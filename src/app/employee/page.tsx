@@ -11,14 +11,16 @@ import {
   requestKarcherRouting,
   getServices,
   createJob,
+  updateJobServices,
   WashSession, 
   KarcherLock,
-  Job
+  Job,
+  Service
 } from '@/lib/db';
 import { supabase } from '@/lib/supabase';
 import BrandSelector from '@/components/BrandSelector';
 import ServiceChecklist from '@/components/ServiceChecklist';
-import { Loader2, LogOut, Car, Info, Settings2, Trash2, CheckCircle2, X, Zap } from 'lucide-react';
+import { Loader2, LogOut, Car, Info, Settings2, Trash2, CheckCircle2, X, Zap, Edit3, ClipboardList, Check } from 'lucide-react';
 
 export default function EmployeePOSPage() {
   const router = useRouter();
@@ -210,6 +212,64 @@ export default function EmployeePOSPage() {
     }
   };
 
+  // --- Edit Services for Active Sessions (Poste 1 & 2) ---
+  const [editingSession, setEditingSession] = useState<WashSession | null>(null);
+  const [allAvailableServices, setAllAvailableServices] = useState<Service[]>([]);
+  const [editSelectedServiceIds, setEditSelectedServiceIds] = useState<number[]>([]);
+  const [savingServices, setSavingServices] = useState<boolean>(false);
+
+  const handleOpenEditServicesModal = async (session: WashSession) => {
+    try {
+      const services = await getServices();
+      setAllAvailableServices(services);
+      const currentIds = (session.services_list || []).map((s) => s.id);
+      setEditSelectedServiceIds(currentIds);
+      setEditingSession(session);
+    } catch (err) {
+      console.error('Failed to load services for editing:', err);
+      alert('Erreur lors du chargement des prestations.');
+    }
+  };
+
+  const handleToggleEditService = (serviceId: number) => {
+    setEditSelectedServiceIds((prev) =>
+      prev.includes(serviceId)
+        ? prev.filter((id) => id !== serviceId)
+        : [...prev, serviceId]
+    );
+  };
+
+  const handleSaveEditedServices = async () => {
+    if (!editingSession) return;
+    try {
+      setSavingServices(true);
+      const selected = allAvailableServices.filter((s) =>
+        editSelectedServiceIds.includes(s.id)
+      );
+      const newTotal = selected.reduce((sum, s) => sum + s.price, 0);
+
+      await updateJobServices(
+        editingSession.job_id,
+        newTotal,
+        editSelectedServiceIds
+      );
+
+      // Refresh active sessions immediately
+      const sessions = await getActiveSessions();
+      setActiveSessions(sessions);
+      setEditingSession(null);
+    } catch (err: any) {
+      console.error('Failed to update job services:', err);
+      alert(
+        `Erreur lors de la modification des prestations : ${
+          err?.message || 'Erreur inconnue'
+        }`
+      );
+    } finally {
+      setSavingServices(false);
+    }
+  };
+
   // Helper selectors
   const sessionP1 = activeSessions.find(s => s.bay === 1);
   const sessionP2 = activeSessions.find(s => s.bay === 2);
@@ -266,6 +326,47 @@ export default function EmployeePOSPage() {
               <Car className="w-5 h-5 text-gray-500 shrink-0" />
               <span>{session.car_brand} ({session.vehicle_type})</span>
             </h3>
+          </div>
+
+          {/* Services List with Edit Option */}
+          <div className="bg-gray-50 border border-gray-150 p-3 rounded-2xl space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-1.5 text-gray-500">
+                <ClipboardList className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Prestations</span>
+              </div>
+              <button
+                onClick={() => handleOpenEditServicesModal(session)}
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all active:scale-95 flex items-center space-x-1 cursor-pointer border border-blue-200"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>Modifier</span>
+              </button>
+            </div>
+            
+            <div className="flex flex-wrap gap-1.5">
+              {session.services_list && session.services_list.length > 0 ? (
+                session.services_list.map((srv) => (
+                  <span
+                    key={srv.id}
+                    className="text-xs font-bold bg-white border border-gray-200 text-gray-800 px-2 py-0.5 rounded-lg shadow-2xs"
+                  >
+                    {srv.name} ({srv.price.toFixed(2)} DT)
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-gray-400 italic">
+                  Aucune prestation spécifique
+                </span>
+              )}
+            </div>
+
+            <div className="text-right pt-1 border-t border-gray-200 flex justify-between items-center">
+              <span className="text-[10px] font-bold text-gray-500 uppercase">Montant total :</span>
+              <span className="text-xs font-black text-blue-600">
+                {(session.total_amount || 0).toFixed(2)} DT
+              </span>
+            </div>
           </div>
 
           {/* Scans Counters */}
@@ -644,6 +745,112 @@ export default function EmployeePOSPage() {
               )}
             </div>
 
+          </div>
+      {/* === MODAL MODIFICATION PRESTATIONS (Poste 1 & 2) === */}
+      {editingSession && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3">
+          <div className="w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <header className="px-5 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <ClipboardList className="w-5 h-5 text-blue-600" />
+                <div>
+                  <h3 className="font-black text-gray-900 text-sm sm:text-base">
+                    Modifier les prestations — Poste {editingSession.bay}
+                  </h3>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                    {editingSession.car_brand} ({editingSession.vehicle_type})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingSession(null)}
+                className="p-1 rounded-xl hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </header>
+
+            {/* Services List */}
+            <div className="p-5 flex-1 overflow-y-auto space-y-2.5">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                Cochez ou décochez les prestations souhaitées :
+              </p>
+              {allAvailableServices.map((service) => {
+                const isSelected = editSelectedServiceIds.includes(service.id);
+                return (
+                  <button
+                    key={service.id}
+                    type="button"
+                    onClick={() => handleToggleEditService(service.id)}
+                    className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-blue-600 bg-blue-50/70 text-blue-900 font-bold shadow-xs'
+                        : 'border-gray-200 bg-white hover:border-gray-300 text-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div
+                        className={`w-5 h-5 rounded-lg flex items-center justify-center transition-colors ${
+                          isSelected
+                            ? 'bg-blue-600 text-white'
+                            : 'border border-gray-300 bg-gray-50'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </div>
+                      <span className="text-sm">{service.name}</span>
+                    </div>
+                    <span
+                      className={`text-xs font-black ${
+                        isSelected ? 'text-blue-600' : 'text-gray-500'
+                      }`}
+                    >
+                      {service.price.toFixed(2)} DT
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Footer with calculated total & save button */}
+            <footer className="p-5 border-t border-gray-200 bg-gray-50 flex flex-col space-y-3">
+              <div className="flex justify-between items-center px-1">
+                <span className="text-xs font-bold text-gray-500 uppercase">
+                  Nouveau Total :
+                </span>
+                <span className="text-lg font-black text-blue-600">
+                  {allAvailableServices
+                    .filter((s) => editSelectedServiceIds.includes(s.id))
+                    .reduce((sum, s) => sum + s.price, 0)
+                    .toFixed(2)}{' '}
+                  DT
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingSession(null)}
+                  className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl text-xs transition-all"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditedServices}
+                  disabled={savingServices || editSelectedServiceIds.length === 0}
+                  className="flex-2 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {savingServices ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  <span>Enregistrer</span>
+                </button>
+              </div>
+            </footer>
           </div>
         </div>
       )}

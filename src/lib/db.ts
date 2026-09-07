@@ -52,6 +52,8 @@ export interface WashSession {
   created_at: string;
   completed_at: string | null;
   car_brand?: string;
+  total_amount?: number;
+  services_list?: { id: number; name: string; price: number }[];
 }
 
 export interface Activation {
@@ -360,7 +362,7 @@ export async function updateVehicleTypeConfig(
 export async function getActiveSessions(): Promise<WashSession[]> {
   const { data, error } = await supabase
     .from('wash_sessions')
-    .select('*, jobs(car_brand)')
+    .select('*, jobs(car_brand, total_amount, job_services(services(id, name, price)))')
     .eq('status', 'active');
 
   if (error) {
@@ -368,10 +370,74 @@ export async function getActiveSessions(): Promise<WashSession[]> {
     throw error;
   }
 
-  return (data || []).map((s: any) => ({
-    ...s,
-    car_brand: s.jobs?.car_brand || 'Inconnu'
-  }));
+  return (data || []).map((s: any) => {
+    const job = s.jobs;
+    const services_list = (job?.job_services || [])
+      .map((js: any) => ({
+        id: js.services?.id,
+        name: js.services?.name || 'Inconnu',
+        price: Number(js.services?.price || 0)
+      }))
+      .filter((srv: any) => srv.id != null);
+
+    return {
+      ...s,
+      car_brand: job?.car_brand || 'Inconnu',
+      total_amount: Number(job?.total_amount || 0),
+      services_list
+    };
+  });
+}
+
+// Update services and total_amount for an existing job
+export async function updateJobServices(
+  jobId: string,
+  totalAmount: number,
+  selectedServiceIds: number[]
+): Promise<void> {
+  // Update total_amount in jobs
+  const { error: jobErr } = await supabase
+    .from('jobs')
+    .update({ total_amount: totalAmount })
+    .eq('id', jobId);
+
+  if (jobErr) {
+    console.error(`Error updating job total amount for ${jobId}:`, jobErr);
+    throw jobErr;
+  }
+
+  // Delete old job_services
+  const { error: delErr } = await supabase
+    .from('job_services')
+    .delete()
+    .eq('job_id', jobId);
+
+  if (delErr) {
+    console.error(`Error deleting old job services for ${jobId}:`, delErr);
+    throw delErr;
+  }
+
+  // Insert new job_services
+  if (selectedServiceIds.length > 0) {
+    const allServices = await getServices();
+    const toInsert = selectedServiceIds.map((sId) => {
+      const match = allServices.find((s) => s.id === sId);
+      return {
+        job_id: jobId,
+        service_id: sId,
+        price_charged: match ? match.price : 0
+      };
+    });
+
+    const { error: insErr } = await supabase
+      .from('job_services')
+      .insert(toInsert);
+
+    if (insErr) {
+      console.error(`Error inserting updated job services for ${jobId}:`, insErr);
+      throw insErr;
+    }
+  }
 }
 
 // Fetch all wash sessions (all statuses) with alerts
