@@ -190,9 +190,9 @@ export default function EmployeePOSPage() {
       await createWashSession(3, vehicleType, job.id);
       const sessions = await getActiveSessions();
       setActiveSessions(sessions);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to start Poste 3 session:', err);
-      alert('Erreur lors du lancement de la session Poste 3.');
+      alert(`Erreur lors du lancement de la session Poste 3 : ${err?.message || 'Erreur inconnue'}`);
     } finally {
       setStartingP3Type(null);
     }

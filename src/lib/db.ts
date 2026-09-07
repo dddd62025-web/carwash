@@ -180,10 +180,23 @@ export async function createJob(
 
   if (jobError) {
     console.error('Error inserting job:', jobError);
-    throw jobError;
+    throw new Error(jobError.message || 'Erreur lors de la création du job.');
   }
 
   const jobId = jobData.id;
+
+  // Ensure services exist in services table to prevent FK errors
+  for (const s of selectedServices) {
+    const { error: serviceUpsertErr } = await supabase
+      .from('services')
+      .upsert(
+        { id: s.serviceId, name: carBrand, price: s.priceCharged },
+        { onConflict: 'id', ignoreDuplicates: true }
+      );
+    if (serviceUpsertErr) {
+      console.warn('Note on service existence check:', serviceUpsertErr.message);
+    }
+  }
 
   // Insert associated services
   const jobServicesToInsert = selectedServices.map((s) => ({
@@ -200,7 +213,7 @@ export async function createJob(
     console.error('Error inserting job services:', serviceError);
     // Cleanup parent job record
     await supabase.from('jobs').delete().eq('id', jobId);
-    throw serviceError;
+    throw new Error(serviceError.message || 'Erreur lors de la liaison des services.');
   }
 
   return jobData as Job;
@@ -386,6 +399,31 @@ export async function createWashSession(
   vehicleType: string,
   jobId: string
 ): Promise<WashSession> {
+  // Ensure vehicle_type_config row exists in DB to prevent foreign key errors
+  const defaultConfigMap: Record<string, { k: number; ke: number }> = {
+    'Moto': { k: 120, ke: 90 },
+    'Tapis': { k: 150, ke: 120 },
+    'Tacha': { k: 180, ke: 120 },
+    'Petite voiture': { k: 180, ke: 120 },
+    'Grande voiture': { k: 240, ke: 180 },
+    'Camion': { k: 300, ke: 240 },
+  };
+  const cfg = defaultConfigMap[vehicleType] || { k: 180, ke: 120 };
+
+  const { error: cfgErr } = await supabase
+    .from('vehicle_type_config')
+    .upsert({
+      vehicle_type: vehicleType,
+      karcher_initial_seconds: cfg.k,
+      karcher_extension_seconds: cfg.ke,
+      vacuum_initial_seconds: null,
+      vacuum_extension_seconds: null
+    }, { onConflict: 'vehicle_type', ignoreDuplicates: true });
+
+  if (cfgErr) {
+    console.warn('Vehicle type config auto-check notice:', cfgErr.message);
+  }
+
   const { data, error } = await supabase
     .from('wash_sessions')
     .insert({
@@ -399,7 +437,7 @@ export async function createWashSession(
 
   if (error) {
     console.error('Error inserting wash session:', error);
-    throw error;
+    throw new Error(error.message || 'Erreur d\'insertion session de lavage.');
   }
   return data as WashSession;
 }
