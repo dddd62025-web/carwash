@@ -8,13 +8,15 @@ import {
   getKarcherLock, 
   createWashSession, 
   completeWashSession, 
+  requestKarcherRouting,
   WashSession, 
   KarcherLock,
   Job
 } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import BrandSelector from '@/components/BrandSelector';
 import ServiceChecklist from '@/components/ServiceChecklist';
-import { Loader2, LogOut, Car, Info, Settings2, Trash2, CheckCircle2, X } from 'lucide-react';
+import { Loader2, LogOut, Car, Info, Settings2, Trash2, CheckCircle2, X, Zap } from 'lucide-react';
 
 export default function EmployeePOSPage() {
   const router = useRouter();
@@ -83,16 +85,12 @@ export default function EmployeePOSPage() {
     loadActiveEmployee();
   }, []);
 
-  // Poll database for active sessions and Karcher lock every 3 seconds
+  // Poll database for active sessions every 3 seconds
   useEffect(() => {
     async function fetchPolledData() {
       try {
-        const [sessions, lock] = await Promise.all([
-          getActiveSessions(),
-          getKarcherLock()
-        ]);
+        const sessions = await getActiveSessions();
         setActiveSessions(sessions);
-        setKarcherLock(lock);
       } catch (err) {
         console.warn('Polling error (Supabase might be sleeping):', err);
       }
@@ -101,6 +99,30 @@ export default function EmployeePOSPage() {
     fetchPolledData(); // run once on mount
     const interval = setInterval(fetchPolledData, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Realtime subscription for Kärcher lock status
+  useEffect(() => {
+    // Fetch initial lock state
+    getKarcherLock()
+      .then((lock) => setKarcherLock(lock))
+      .catch((err) => console.warn('Initial Kärcher lock fetch error:', err));
+
+    const channel = supabase
+      .channel('karcher-lock-status')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'karcher_lock', filter: 'id=eq.1' },
+        (payload) => {
+          const lock = payload.new as KarcherLock;
+          setKarcherLock(lock);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // --- Actions ---
@@ -137,6 +159,20 @@ export default function EmployeePOSPage() {
     } catch (err) {
       console.error('Failed to complete session:', err);
       alert('Erreur lors de la clôture de la session de lavage.');
+    }
+  };
+
+  const [routingBay, setRoutingBay] = useState<number | null>(null);
+
+  const handleRequestKarcher = async (bay: number, sessionId: string) => {
+    try {
+      setRoutingBay(bay);
+      await requestKarcherRouting(bay, sessionId);
+    } catch (err) {
+      console.error('Failed to request Kärcher routing:', err);
+      alert('Erreur lors de la demande de routage Kärcher.');
+    } finally {
+      setRoutingBay(null);
     }
   };
 
@@ -235,6 +271,40 @@ export default function EmployeePOSPage() {
                 <span className="w-2.5 h-2.5 bg-gray-300 rounded-full shrink-0" />
                 <span>Libre - Prêt au scan de badge</span>
               </div>
+            )}
+          </div>
+
+          {/* Kärcher Routing Button */}
+          <div className="pt-1">
+            {isKarcherLockOwned ? (
+              <button
+                disabled
+                className="w-full py-3 bg-green-100 text-green-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-green-200 cursor-default"
+              >
+                <Zap className="w-4 h-4" />
+                <span>Kärcher actif sur ce poste</span>
+              </button>
+            ) : isKarcherLockBusy ? (
+              <button
+                disabled
+                className="w-full py-3 bg-amber-50 text-amber-600 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-amber-200 cursor-not-allowed opacity-70"
+              >
+                <Zap className="w-4 h-4" />
+                <span>Kärcher utilisé — Poste {karcherBusyBay}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => handleRequestKarcher(session.bay, session.id)}
+                disabled={routingBay === session.bay}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-2 transition-all active:scale-95 shadow-md cursor-pointer disabled:opacity-60"
+              >
+                {routingBay === session.bay ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Zap className="w-4 h-4" />
+                )}
+                <span>Utiliser le Kärcher pour ce poste</span>
+              </button>
             )}
           </div>
         </div>
@@ -449,6 +519,40 @@ export default function EmployeePOSPage() {
                         <span className="w-2.5 h-2.5 bg-gray-300 rounded-full shrink-0" />
                         <span>Libre - Prêt au scan de badge</span>
                       </div>
+                    )}
+                  </div>
+
+                  {/* Kärcher Routing Button */}
+                  <div className="pt-1">
+                    {karcherLock?.locked_by_session_id === sessionP3.id ? (
+                      <button
+                        disabled
+                        className="w-full py-3 bg-green-100 text-green-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-green-200 cursor-default"
+                      >
+                        <Zap className="w-4 h-4" />
+                        <span>Kärcher actif sur ce poste</span>
+                      </button>
+                    ) : karcherLock?.locked_by_session_id ? (
+                      <button
+                        disabled
+                        className="w-full py-3 bg-amber-50 text-amber-600 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-amber-200 cursor-not-allowed opacity-70"
+                      >
+                        <Zap className="w-4 h-4" />
+                        <span>Kärcher utilisé — Poste {karcherLock.locked_by_bay}</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleRequestKarcher(3, sessionP3.id)}
+                        disabled={routingBay === 3}
+                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-2 transition-all active:scale-95 shadow-md cursor-pointer disabled:opacity-60"
+                      >
+                        {routingBay === 3 ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Zap className="w-4 h-4" />
+                        )}
+                        <span>Utiliser le Kärcher pour ce poste</span>
+                      </button>
                     )}
                   </div>
 

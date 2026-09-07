@@ -392,6 +392,20 @@ export async function getKarcherLock(): Promise<KarcherLock | null> {
   return data as KarcherLock;
 }
 
+// Request Kärcher routing to a specific bay via RPC
+export async function requestKarcherRouting(bay: number, sessionId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('request_karcher_routing', {
+    p_bay: bay,
+    p_session_id: sessionId
+  });
+
+  if (error) {
+    console.error(`Error requesting Kärcher routing for bay ${bay}:`, error);
+    throw error;
+  }
+  return !!data;
+}
+
 // Fetch detailed activations list for a given wash session
 export async function getActivationsForSession(sessionId: string): Promise<Activation[]> {
   const { data, error } = await supabase

@@ -306,7 +306,24 @@ BEGIN
 END;
 $$;
 
--- 5.5 acknowledge_alert
+-- 5.5 request_karcher_routing
+CREATE OR REPLACE FUNCTION request_karcher_routing(p_bay INT, p_session_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE karcher_lock
+    SET locked_by_session_id = p_session_id,
+        locked_by_bay = p_bay,
+        locked_at = now(),
+        expires_at = now() + INTERVAL '60 seconds'
+    WHERE id = 1;
+    RETURN true;
+END;
+$$;
+
+-- 5.6 acknowledge_alert
 CREATE OR REPLACE FUNCTION acknowledge_alert(p_session_id UUID)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -366,6 +383,7 @@ GRANT EXECUTE ON FUNCTION request_activation(INT, TEXT) TO public;
 GRANT EXECUTE ON FUNCTION end_activation(UUID) TO public;
 GRANT EXECUTE ON FUNCTION heartbeat_activation(UUID) TO public;
 GRANT EXECUTE ON FUNCTION expire_stuck_locks() TO public;
+GRANT EXECUTE ON FUNCTION request_karcher_routing(INT, UUID) TO public;
 GRANT EXECUTE ON FUNCTION acknowledge_alert(UUID) TO public;
 
 -- 7. Insertion des Données de Référence (Seeds)
@@ -384,8 +402,6 @@ ON CONFLICT (id) DO UPDATE SET
 -- Rétablir les comptes opérateurs (avec hachage bcrypt)
 INSERT INTO app_users (id, name, role, password_hash)
 VALUES
-    ('11111111-1111-1111-1111-111111111111', 'Kais', 'employee', '$2a$06$nErinK1Gm6X7gR3W0IMcH.9gYCNXID3gTXKS8suY3HWzhMmxRdoDe'),
-    ('22222222-2222-2222-2222-222222222222', 'Amine', 'employee', '$2a$06$nErinK1Gm6X7gR3W0IMcH.9gYCNXID3gTXKS8suY3HWzhMmxRdoDe'),
     ('33333333-3333-3333-3333-333333333333', 'Employé', 'employee', '$2a$06$nErinK1Gm6X7gR3W0IMcH.9gYCNXID3gTXKS8suY3HWzhMmxRdoDe'),
     ('44444444-4444-4444-4444-444444444444', 'Issam', 'owner', '$2a$06$mF0XraxeLBvxDCbwec5Fl.djt.4zBwrmSH84kzTsT2JEeAyfUfQ3W')
 ON CONFLICT (id) DO UPDATE SET
