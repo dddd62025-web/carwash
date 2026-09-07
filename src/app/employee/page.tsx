@@ -598,7 +598,8 @@ export default function EmployeePOSPage() {
                     <span>Terminer le lavage</span>
                   </button>
                 </div>
-                // Inactive: Direct 1-click selection for Moto, Tapis, Tacha
+              ) : (
+                /* Inactive: Direct 1-click selection for Moto, Tapis, Tacha */
                 <div className="space-y-4 py-2">
                   <div className="text-center space-y-1">
                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sélection Directe Poste 3</p>
