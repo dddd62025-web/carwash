@@ -746,6 +746,9 @@ export default function EmployeePOSPage() {
             </div>
 
           </div>
+        </div>
+      )}
+
       {/* === MODAL MODIFICATION PRESTATIONS (Poste 1 & 2) === */}
       {editingSession && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3">
