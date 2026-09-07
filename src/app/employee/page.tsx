@@ -9,6 +9,8 @@ import {
   createWashSession, 
   completeWashSession, 
   requestKarcherRouting,
+  getServices,
+  createJob,
   WashSession, 
   KarcherLock,
   Job
@@ -163,6 +165,38 @@ export default function EmployeePOSPage() {
   };
 
   const [routingBay, setRoutingBay] = useState<number | null>(null);
+  const [startingP3Type, setStartingP3Type] = useState<string | null>(null);
+
+  const handleStartPoste3Direct = async (vehicleType: string) => {
+    if (!employeeId) {
+      alert('Employé non identifié.');
+      return;
+    }
+    try {
+      setStartingP3Type(vehicleType);
+      const servicesList = await getServices();
+      const serviceMatch = servicesList.find(s => s.name.toLowerCase() === vehicleType.toLowerCase());
+      
+      const serviceId = serviceMatch ? serviceMatch.id : (vehicleType === 'Moto' ? 6 : vehicleType === 'Tapis' ? 7 : 8);
+      const price = serviceMatch ? serviceMatch.price : (vehicleType === 'Moto' ? 10 : vehicleType === 'Tapis' ? 5 : 15);
+
+      const job = await createJob(
+        employeeId,
+        vehicleType,
+        price,
+        [{ serviceId, priceCharged: price }]
+      );
+
+      await createWashSession(3, vehicleType, job.id);
+      const sessions = await getActiveSessions();
+      setActiveSessions(sessions);
+    } catch (err) {
+      console.error('Failed to start Poste 3 session:', err);
+      alert('Erreur lors du lancement de la session Poste 3.');
+    } finally {
+      setStartingP3Type(null);
+    }
+  };
 
   const handleRequestKarcher = async (bay: number, sessionId: string) => {
     try {
@@ -564,34 +598,47 @@ export default function EmployeePOSPage() {
                     <span>Terminer le lavage</span>
                   </button>
                 </div>
-              ) : (
-                // Inactive: selector & services
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between bg-gray-50 p-3.5 rounded-2xl border border-gray-150">
-                    <span className="text-xs font-bold text-gray-500 uppercase">Type de lavage :</span>
-                    <select
-                      value={p3VehicleType}
-                      onChange={(e) => setP3VehicleType(e.target.value)}
-                      className="bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-extrabold text-gray-800 focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="Moto">Moto</option>
-                      <option value="Tapis">Tapis</option>
-                      <option value="Tacha">Tacha</option>
-                    </select>
+                // Inactive: Direct 1-click selection for Moto, Tapis, Tacha
+                <div className="space-y-4 py-2">
+                  <div className="text-center space-y-1">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sélection Directe Poste 3</p>
+                    <p className="text-[11px] text-gray-400 font-medium">Choisissez le type de prestation pour démarrer immédiatement</p>
                   </div>
 
-                  {/* Inline simplified checklist, selectedBrand is defaulted to p3VehicleType */}
-                  <ServiceChecklist
-                    selectedBrand={p3VehicleType}
-                    employeeId={employeeId || ''}
-                    onCancel={() => setIsP3Open(false)}
-                    onSuccess={() => {}}
-                    onSuccessWithJob={(job) => {
-                      handleStartSession(3, p3VehicleType, job.id);
-                      // keep modal open to show active session
-                    }}
-                    isCompact={true}
-                  />
+                  <div className="grid grid-cols-1 gap-3">
+                    {[
+                      { type: 'Moto', label: 'Moto', icon: '🏍️', sub: 'Lavage Moto' },
+                      { type: 'Tapis', label: 'Tapis', icon: '🧹', sub: 'Nettoyage Tapis' },
+                      { type: 'Tacha', label: 'Tacha', icon: '🧽', sub: 'Traitement Tacha' },
+                    ].map((item) => (
+                      <button
+                        key={item.type}
+                        onClick={() => handleStartPoste3Direct(item.type)}
+                        disabled={startingP3Type !== null}
+                        className="w-full p-4 rounded-2xl border border-gray-200 hover:border-blue-500 hover:shadow-md bg-white transition-all active:scale-[0.98] flex items-center justify-between group cursor-pointer disabled:opacity-60"
+                      >
+                        <div className="flex items-center space-x-3.5">
+                          <span className="text-2xl p-2.5 rounded-xl bg-gray-50 group-hover:bg-blue-50 transition-colors">
+                            {item.icon}
+                          </span>
+                          <div className="text-left">
+                            <h4 className="font-black text-gray-900 text-base group-hover:text-blue-600 transition-colors uppercase">
+                              {item.label}
+                            </h4>
+                            <p className="text-xs text-gray-400 font-semibold">{item.sub}</p>
+                          </div>
+                        </div>
+
+                        {startingP3Type === item.type ? (
+                          <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        ) : (
+                          <span className="py-2 px-4 rounded-xl bg-blue-50 group-hover:bg-blue-600 text-blue-700 group-hover:text-white font-extrabold text-xs transition-all">
+                            Lancer
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

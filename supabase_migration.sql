@@ -387,14 +387,17 @@ GRANT EXECUTE ON FUNCTION request_karcher_routing(INT, UUID) TO public;
 GRANT EXECUTE ON FUNCTION acknowledge_alert(UUID) TO public;
 
 -- 7. Insertion des Données de Référence (Seeds)
--- Rétablir les 5 prestations de lavage standard
+-- Rétablir les prestations de lavage standard
 INSERT INTO services (id, name, price)
 VALUES
     (1, 'Lavage extérieur', 10.00),
     (2, 'Lavage intérieur', 15.00),
     (3, 'Lavage moteur', 20.00),
     (4, 'Lavage vapeur', 25.00),
-    (5, 'Vidange', 50.00)
+    (5, 'Vidange', 50.00),
+    (6, 'Moto', 10.00),
+    (7, 'Tapis', 5.00),
+    (8, 'Tacha', 15.00)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     price = EXCLUDED.price;

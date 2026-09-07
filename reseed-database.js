@@ -17,7 +17,10 @@ async function reseed() {
     { id: 2, name: 'Lavage intérieur', price: 15.00 },
     { id: 3, name: 'Lavage moteur', price: 20.00 },
     { id: 4, name: 'Lavage vapeur', price: 25.00 },
-    { id: 5, name: 'Vidange', price: 50.00 }
+    { id: 5, name: 'Vidange', price: 50.00 },
+    { id: 6, name: 'Moto', price: 10.00 },
+    { id: 7, name: 'Tapis', price: 5.00 },
+    { id: 8, name: 'Tacha', price: 15.00 }
   ];
 
   console.log('Inserting services...');
