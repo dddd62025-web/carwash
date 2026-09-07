@@ -508,6 +508,29 @@ export async function createWashSession(
   return data as WashSession;
 }
 
+// Release the Kärcher lock (manually or automatically)
+export async function releaseKarcherLock(sessionId?: string): Promise<boolean> {
+  let query = supabase.from('karcher_lock').update({
+    locked_by_session_id: null,
+    locked_by_bay: null,
+    locked_at: null,
+    expires_at: null
+  });
+
+  if (sessionId) {
+    query = query.eq('locked_by_session_id', sessionId);
+  } else {
+    query = query.eq('id', 1);
+  }
+
+  const { error } = await query;
+  if (error) {
+    console.error('Error releasing Karcher lock:', error);
+    return false;
+  }
+  return true;
+}
+
 // Mark an active session as completed
 export async function completeWashSession(sessionId: string): Promise<void> {
   const { error } = await supabase
@@ -522,6 +545,9 @@ export async function completeWashSession(sessionId: string): Promise<void> {
     console.error(`Error completing wash session ${sessionId}:`, error);
     throw error;
   }
+
+  // Auto-release Kärcher lock if held by this completed session
+  await releaseKarcherLock(sessionId);
 }
 
 // Get the shared Karcher lock state

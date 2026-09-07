@@ -9,6 +9,7 @@ import {
   createWashSession, 
   completeWashSession, 
   requestKarcherRouting,
+  releaseKarcherLock,
   getServices,
   createJob,
   updateJobServices,
@@ -20,7 +21,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import BrandSelector from '@/components/BrandSelector';
 import ServiceChecklist from '@/components/ServiceChecklist';
-import { Loader2, LogOut, Car, Info, Settings2, Trash2, CheckCircle2, X, Zap, Edit3, ClipboardList, Check } from 'lucide-react';
+import { Loader2, LogOut, Car, Info, Settings2, Trash2, CheckCircle2, X, Zap, Edit3, ClipboardList, Check, Unlock } from 'lucide-react';
 
 export default function EmployeePOSPage() {
   const router = useRouter();
@@ -157,9 +158,13 @@ export default function EmployeePOSPage() {
   const handleCompleteSession = async (sessionId: string) => {
     try {
       await completeWashSession(sessionId);
-      // Re-fetch active sessions immediately
-      const sessions = await getActiveSessions();
+      // Re-fetch active sessions and Kärcher lock immediately
+      const [sessions, lock] = await Promise.all([
+        getActiveSessions(),
+        getKarcherLock()
+      ]);
       setActiveSessions(sessions);
+      setKarcherLock(lock);
     } catch (err) {
       console.error('Failed to complete session:', err);
       alert('Erreur lors de la clôture de la session de lavage.');
@@ -167,6 +172,7 @@ export default function EmployeePOSPage() {
   };
 
   const [routingBay, setRoutingBay] = useState<number | null>(null);
+  const [releasingLock, setReleasingLock] = useState<boolean>(false);
   const [startingP3Type, setStartingP3Type] = useState<string | null>(null);
 
   const handleStartPoste3Direct = async (vehicleType: string) => {
@@ -204,11 +210,27 @@ export default function EmployeePOSPage() {
     try {
       setRoutingBay(bay);
       await requestKarcherRouting(bay, sessionId);
+      const updatedLock = await getKarcherLock();
+      setKarcherLock(updatedLock);
     } catch (err) {
       console.error('Failed to request Kärcher routing:', err);
       alert('Erreur lors de la demande de routage Kärcher.');
     } finally {
       setRoutingBay(null);
+    }
+  };
+
+  const handleReleaseKarcher = async (sessionId?: string) => {
+    try {
+      setReleasingLock(true);
+      await releaseKarcherLock(sessionId);
+      const updatedLock = await getKarcherLock();
+      setKarcherLock(updatedLock);
+    } catch (err) {
+      console.error('Failed to release Kärcher lock:', err);
+      alert('Erreur lors de la libération du Kärcher.');
+    } finally {
+      setReleasingLock(false);
     }
   };
 
@@ -409,24 +431,40 @@ export default function EmployeePOSPage() {
             )}
           </div>
 
-          {/* Kärcher Routing Button */}
+          {/* Kärcher Routing / Release Button */}
           <div className="pt-1">
             {isKarcherLockOwned ? (
               <button
-                disabled
-                className="w-full py-3 bg-green-100 text-green-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-green-200 cursor-default"
+                onClick={() => handleReleaseKarcher(session.id)}
+                disabled={releasingLock}
+                className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold rounded-xl text-xs flex items-center justify-center space-x-2 border border-red-200 transition-all active:scale-95 cursor-pointer disabled:opacity-60 shadow-xs"
               >
-                <Zap className="w-4 h-4" />
-                <span>Kärcher actif sur ce poste</span>
+                {releasingLock ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Unlock className="w-4 h-4 text-red-600" />
+                )}
+                <span>Libérer le Kärcher (Poste {session.bay})</span>
               </button>
             ) : isKarcherLockBusy ? (
-              <button
-                disabled
-                className="w-full py-3 bg-amber-50 text-amber-600 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-amber-200 cursor-not-allowed opacity-70"
-              >
-                <Zap className="w-4 h-4" />
-                <span>Kärcher utilisé — Poste {karcherBusyBay}</span>
-              </button>
+              <div className="flex gap-2">
+                <button
+                  disabled
+                  className="flex-1 py-3 bg-amber-50 text-amber-600 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 border border-amber-200 cursor-not-allowed opacity-80"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Utilisé — Poste {karcherBusyBay}</span>
+                </button>
+                <button
+                  onClick={() => handleReleaseKarcher()}
+                  disabled={releasingLock}
+                  className="py-3 px-3 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 border border-red-200 transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="Libérer le Kärcher manuellement"
+                >
+                  {releasingLock ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
+                  <span>Libérer</span>
+                </button>
+              </div>
             ) : (
               <button
                 onClick={() => handleRequestKarcher(session.bay, session.id)}
@@ -657,24 +695,40 @@ export default function EmployeePOSPage() {
                     )}
                   </div>
 
-                  {/* Kärcher Routing Button */}
+                  {/* Kärcher Routing / Release Button */}
                   <div className="pt-1">
                     {karcherLock?.locked_by_session_id === sessionP3.id ? (
                       <button
-                        disabled
-                        className="w-full py-3 bg-green-100 text-green-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-green-200 cursor-default"
+                        onClick={() => handleReleaseKarcher(sessionP3.id)}
+                        disabled={releasingLock}
+                        className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold rounded-xl text-xs flex items-center justify-center space-x-2 border border-red-200 transition-all active:scale-95 cursor-pointer disabled:opacity-60 shadow-xs"
                       >
-                        <Zap className="w-4 h-4" />
-                        <span>Kärcher actif sur ce poste</span>
+                        {releasingLock ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Unlock className="w-4 h-4 text-red-600" />
+                        )}
+                        <span>Libérer le Kärcher (Poste 3)</span>
                       </button>
                     ) : karcherLock?.locked_by_session_id ? (
-                      <button
-                        disabled
-                        className="w-full py-3 bg-amber-50 text-amber-600 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-amber-200 cursor-not-allowed opacity-70"
-                      >
-                        <Zap className="w-4 h-4" />
-                        <span>Kärcher utilisé — Poste {karcherLock.locked_by_bay}</span>
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          disabled
+                          className="flex-1 py-3 bg-amber-50 text-amber-600 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 border border-amber-200 cursor-not-allowed opacity-80"
+                        >
+                          <Zap className="w-4 h-4" />
+                          <span>Utilisé — Poste {karcherLock.locked_by_bay}</span>
+                        </button>
+                        <button
+                          onClick={() => handleReleaseKarcher()}
+                          disabled={releasingLock}
+                          className="py-3 px-3 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 border border-red-200 transition-all active:scale-95 cursor-pointer shrink-0"
+                          title="Libérer le Kärcher manuellement"
+                        >
+                          {releasingLock ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
+                          <span>Libérer</span>
+                        </button>
+                      </div>
                     ) : (
                       <button
                         onClick={() => handleRequestKarcher(3, sessionP3.id)}
