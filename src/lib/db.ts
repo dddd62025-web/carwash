@@ -72,6 +72,17 @@ export interface KarcherLock {
   expires_at: string | null;
 }
 
+const DEFAULT_SERVICES: Service[] = [
+  { id: 1, name: 'Lavage extérieur', price: 10.00 },
+  { id: 2, name: 'Lavage intérieur', price: 15.00 },
+  { id: 3, name: 'Lavage moteur', price: 20.00 },
+  { id: 4, name: 'Lavage vapeur', price: 25.00 },
+  { id: 5, name: 'Vidange', price: 50.00 },
+  { id: 6, name: 'Moto', price: 10.00 },
+  { id: 7, name: 'Tapis', price: 5.00 },
+  { id: 8, name: 'Tacha', price: 15.00 },
+];
+
 // Fetch all washing services from services table
 export async function getServices(): Promise<Service[]> {
   const { data, error } = await supabase
@@ -81,25 +92,57 @@ export async function getServices(): Promise<Service[]> {
 
   if (error) {
     console.error('Error fetching services:', error);
-    throw error;
+    return DEFAULT_SERVICES;
   }
-  return (data || []).map((s) => ({
-    id: s.id,
-    name: s.name,
-    price: Number(s.price),
-  }));
+
+  const dbServices = data || [];
+  const existingMap = new Map(dbServices.map((s) => [s.id, { id: s.id, name: s.name, price: Number(s.price) }]));
+
+  const missingToInsert: Service[] = [];
+  const merged = DEFAULT_SERVICES.map((def) => {
+    if (existingMap.has(def.id)) {
+      return existingMap.get(def.id)!;
+    } else {
+      missingToInsert.push(def);
+      return def;
+    }
+  });
+
+  dbServices.forEach((s) => {
+    if (!DEFAULT_SERVICES.some((d) => d.id === s.id)) {
+      merged.push({ id: s.id, name: s.name, price: Number(s.price) });
+    }
+  });
+
+  if (missingToInsert.length > 0) {
+    supabase.from('services').upsert(missingToInsert, { onConflict: 'id' }).then(({ error: upsertErr }) => {
+      if (upsertErr) console.warn('Note on auto-seeding missing services:', upsertErr.message);
+    });
+  }
+
+  return merged.sort((a, b) => a.id - b.id);
 }
 
 // Update a service price in the services table
-export async function updateServicePrice(id: number, price: number): Promise<void> {
+export async function updateServicePrice(id: number, price: number, name?: string): Promise<void> {
+  const serviceDef = DEFAULT_SERVICES.find((s) => s.id === id);
+  const serviceName = name || serviceDef?.name || `Service #${id}`;
+
   const { error } = await supabase
     .from('services')
-    .update({ price })
-    .eq('id', id);
+    .upsert({ id, name: serviceName, price }, { onConflict: 'id' });
 
   if (error) {
-    console.error(`Error updating service ${id} price:`, error);
-    throw error;
+    // Fallback to update
+    const { error: updateErr } = await supabase
+      .from('services')
+      .update({ price })
+      .eq('id', id);
+
+    if (updateErr) {
+      console.error(`Error updating service ${id} price:`, updateErr);
+      throw updateErr;
+    }
   }
 }
 
