@@ -252,7 +252,10 @@ BEGIN
 
     IF v_activation.resource = 'karcher' THEN
         UPDATE karcher_lock
-        SET expires_at = now() + INTERVAL '60 seconds'
+        SET expires_at = GREATEST(
+            now() + INTERVAL '30 seconds',
+            v_activation.start_time + (v_activation.duration_planned_seconds * INTERVAL '1 second')
+        )
         WHERE locked_by_session_id = v_activation.session_id;
     END IF;
 
@@ -366,10 +369,6 @@ BEGIN
 
     IF NOT FOUND THEN
         RETURN false;
-    END IF;
-
-    IF v_session.status <> 'completed' THEN
-        RAISE EXCEPTION 'La session doit être terminée (status = completed) pour pouvoir être acquittée.';
     END IF;
 
     UPDATE wash_sessions

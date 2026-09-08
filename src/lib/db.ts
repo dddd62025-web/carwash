@@ -54,6 +54,7 @@ export interface WashSession {
   car_brand?: string;
   total_amount?: number;
   services_list?: { id: number; name: string; price: number }[];
+  activations?: Activation[];
 }
 
 export interface Activation {
@@ -362,7 +363,7 @@ export async function updateVehicleTypeConfig(
 export async function getActiveSessions(): Promise<WashSession[]> {
   const { data, error } = await supabase
     .from('wash_sessions')
-    .select('*, jobs(car_brand, total_amount, job_services(services(id, name, price)))')
+    .select('*, jobs(car_brand, total_amount, job_services(services(id, name, price))), activations(*)')
     .eq('status', 'active');
 
   if (error) {
@@ -384,7 +385,8 @@ export async function getActiveSessions(): Promise<WashSession[]> {
       ...s,
       car_brand: job?.car_brand || 'Inconnu',
       total_amount: Number(job?.total_amount || 0),
-      services_list
+      services_list,
+      activations: s.activations || []
     };
   });
 }

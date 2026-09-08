@@ -144,17 +144,22 @@ export default function OwnerDashboardPage() {
     if (e) e.stopPropagation(); // prevent modal trigger
     
     setAcknowledgingId(sessionId);
+    // Optimistically mark as acknowledged locally
+    setAlertSessions(prev => prev.map(s => s.id === sessionId ? { ...s, alert_acknowledged: true } : s));
+    if (selectedSession && selectedSession.id === sessionId) {
+      setSelectedSession(prev => prev ? { ...prev, alert_acknowledged: true } : null);
+    }
+
     try {
       await acknowledgeAlert(sessionId);
-      
-      // If modal detail is currently viewing this session, update it
-      if (selectedSession && selectedSession.id === sessionId) {
-        setSelectedSession(prev => prev ? { ...prev, alert_acknowledged: true } : null);
-      }
-      
       await fetchDashboardData();
     } catch (err) {
       console.error('Failed to acknowledge alert:', err);
+      // Revert optimistic update on failure
+      setAlertSessions(prev => prev.map(s => s.id === sessionId ? { ...s, alert_acknowledged: false } : s));
+      if (selectedSession && selectedSession.id === sessionId) {
+        setSelectedSession(prev => prev ? { ...prev, alert_acknowledged: false } : null);
+      }
       alert('Erreur lors de l\'acquittement de l\'alerte.');
     } finally {
       setAcknowledgingId(null);
@@ -315,7 +320,7 @@ export default function OwnerDashboardPage() {
                       Scans : <span className="text-red-600 font-bold">{session.karcher_activation_count} Kärcher</span> (seuil 5) • <span className="text-red-600 font-bold">{session.vacuum_activation_count} Aspirateur</span> (seuil 3)
                     </p>
                     <p className="text-[10px] text-gray-400 font-semibold">
-                      Statut : {isCompleted ? 'Terminé (Prêt à l\'acquittement)' : 'Actif (En cours de lavage)'}
+                      Statut : {isCompleted ? 'Terminé' : 'Actif (En cours de lavage)'}
                     </p>
                   </div>
 
@@ -323,7 +328,7 @@ export default function OwnerDashboardPage() {
                   {isOwner && (
                     <button
                       onClick={(e) => handleAcknowledgeAlert(session.id, e)}
-                      disabled={!isCompleted || isSaving}
+                      disabled={isSaving}
                       className="w-full sm:w-auto py-2 px-3.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-extrabold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1 active:scale-95 shadow-sm cursor-pointer shrink-0"
                     >
                       {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
@@ -552,7 +557,7 @@ export default function OwnerDashboardPage() {
                   {userRole === 'owner' && (
                     <button
                       onClick={() => handleAcknowledgeAlert(selectedSession.id)}
-                      disabled={selectedSession.status !== 'completed' || acknowledgingId !== null}
+                      disabled={acknowledgingId !== null}
                       className="w-full sm:w-auto py-2 px-4 bg-red-600 hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-extrabold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1 active:scale-95 cursor-pointer"
                     >
                       {acknowledgingId === selectedSession.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}

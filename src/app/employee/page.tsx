@@ -113,7 +113,18 @@ export default function EmployeePOSPage() {
   }, []);
 
   // Timer helper functions for Kärcher lock countdown
-  const getRemainingLockSeconds = (expiresAtStr: string | null | undefined) => {
+  const getRemainingLockSeconds = (expiresAtStr: string | null | undefined, session?: WashSession | null) => {
+    // 1. If an active Kärcher activation is running for this session, calculate remaining time from planned duration
+    if (session?.activations) {
+      const activeAct = session.activations.find(a => a.resource === 'karcher' && !a.end_time);
+      if (activeAct && activeAct.start_time && activeAct.duration_planned_seconds) {
+        const elapsed = Math.floor((Date.now() - new Date(activeAct.start_time).getTime()) / 1000);
+        const remaining = activeAct.duration_planned_seconds - elapsed;
+        return remaining > 0 ? remaining : 0;
+      }
+    }
+
+    // 2. Fall back to expiresAtStr
     if (!expiresAtStr) return 0;
     const diff = Math.ceil((new Date(expiresAtStr).getTime() - Date.now()) / 1000);
     return diff > 0 ? diff : 0;
@@ -436,9 +447,9 @@ export default function EmployeePOSPage() {
                   <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping shrink-0" />
                   <span>Kärcher connecté & actif sur votre poste</span>
                 </div>
-                {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                {getRemainingLockSeconds(karcherLock?.expires_at, session) > 0 && (
                   <span className="bg-green-200 text-green-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
-                    ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                    ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at, session))}
                   </span>
                 )}
               </div>
@@ -448,9 +459,9 @@ export default function EmployeePOSPage() {
                   <span className="w-2.5 h-2.5 bg-amber-500 rounded-full shrink-0" />
                   <span>Occupé par le Poste {karcherBusyBay}</span>
                 </div>
-                {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                {getRemainingLockSeconds(karcherLock?.expires_at, activeSessions.find(s => s.id === karcherLock?.locked_by_session_id)) > 0 && (
                   <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
-                    ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                    ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at, activeSessions.find(s => s.id === karcherLock?.locked_by_session_id)))}
                   </span>
                 )}
               </div>
@@ -714,9 +725,9 @@ export default function EmployeePOSPage() {
                           <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping shrink-0" />
                           <span>Kärcher connecté & actif sur votre poste</span>
                         </div>
-                        {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                        {getRemainingLockSeconds(karcherLock?.expires_at, sessionP3) > 0 && (
                           <span className="bg-green-200 text-green-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
-                            ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                            ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at, sessionP3))}
                           </span>
                         )}
                       </div>
@@ -726,9 +737,9 @@ export default function EmployeePOSPage() {
                           <span className="w-2.5 h-2.5 bg-amber-500 rounded-full shrink-0" />
                           <span>Occupé par le Poste {karcherLock.locked_by_bay}</span>
                         </div>
-                        {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                        {getRemainingLockSeconds(karcherLock?.expires_at, activeSessions.find(s => s.id === karcherLock?.locked_by_session_id)) > 0 && (
                           <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
-                            ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                            ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at, activeSessions.find(s => s.id === karcherLock?.locked_by_session_id)))}
                           </span>
                         )}
                       </div>
