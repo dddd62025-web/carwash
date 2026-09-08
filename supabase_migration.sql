@@ -1,3 +1,22 @@
+-- 0. Table des badges RFID autorisés
+CREATE TABLE IF NOT EXISTS authorized_tags (
+    id SERIAL PRIMARY KEY,
+    tag_uid TEXT UNIQUE NOT NULL,
+    label TEXT DEFAULT 'Badge Autorisé',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Seed badges RFID autorisés
+INSERT INTO authorized_tags (tag_uid, label) VALUES
+    ('C13696A3', 'Badge RFID 1'),
+    ('97308005', 'Badge RFID 2'),
+    ('92896A06', 'Badge RFID 3'),
+    ('CE887F05', 'Badge RFID 4'),
+    ('F11871A3', 'Badge RFID 5'),
+    ('5432F106', 'Badge RFID 6')
+ON CONFLICT (tag_uid) DO UPDATE SET is_active = true;
+
 -- 1. Table configuration par type de véhicule
 CREATE TABLE IF NOT EXISTS vehicle_type_config (
     vehicle_type TEXT PRIMARY KEY,
