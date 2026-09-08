@@ -83,151 +83,121 @@ ON CONFLICT (id) DO NOTHING;
 
 -- 5. Fonctions stockées PL/pgSQL (RPC)
 
--- 5.1 request_activation
-CREATE OR REPLACE FUNCTION request_activation(p_bay INT, p_resource TEXT)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
+-- 5.1 request_activation avec vérification du badge RFID
+CREATE OR REPLACE FUNCTION request_activation(p_bay int, p_resource text, p_tag_uid text)
+RETURNS json AS $$
 DECLARE
-    v_session RECORD;
-    v_mapped_resource TEXT;
-    v_lock_session_id UUID;
-    v_lock_bay INT;
-    v_lock_expires TIMESTAMPTZ;
-    v_seq_num INT;
-    v_duration INT;
-    v_activation_id UUID;
-    v_karcher_count INT;
-    v_vacuum_count INT;
-    v_alert_triggered BOOLEAN;
-    v_config RECORD;
+  v_session         wash_sessions%ROWTYPE;
+  v_config          vehicle_type_config%ROWTYPE;
+  v_lock            karcher_lock%ROWTYPE;
+  v_tag_valid       boolean;
+  v_already_running boolean;
+  v_seq             int;
+  v_duration        int;
+  v_activation_id   uuid;
 BEGIN
-    -- Obtenir la session active pour ce poste
-    SELECT * INTO v_session
-    FROM wash_sessions
-    WHERE bay = p_bay AND status = 'active'
-    LIMIT 1;
+  -- 1. Vérification du badge en premier
+  SELECT EXISTS(
+    SELECT 1 FROM authorized_tags
+    WHERE tag_uid = p_tag_uid AND is_active = true
+  ) INTO v_tag_valid;
 
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('allowed', false, 'reason', 'no_active_session');
+  IF NOT v_tag_valid THEN
+    RETURN json_build_object('allowed', false, 'reason', 'unauthorized_tag');
+  END IF;
+
+  -- 2. Session active sur ce poste ?
+  SELECT * INTO v_session FROM wash_sessions
+  WHERE bay = p_bay AND status = 'active'
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN json_build_object('allowed', false, 'reason', 'no_active_session');
+  END IF;
+
+  -- 3. Un timer est-il déjà en cours pour cette ressource sur cette session ?
+  SELECT EXISTS(
+    SELECT 1 FROM activations
+    WHERE session_id = v_session.id AND resource = p_resource AND end_time IS NULL
+  ) INTO v_already_running;
+
+  IF v_already_running THEN
+    RETURN json_build_object('allowed', false, 'reason', 'already_running');
+  END IF;
+
+  -- 4. Verrou spécifique au Kärcher : verrouille la ligne pour éviter une course
+  IF p_resource = 'karcher' THEN
+    SELECT * INTO v_lock FROM karcher_lock WHERE id = 1 FOR UPDATE;
+
+    IF v_lock.locked_by_session_id IS NOT NULL
+       AND v_lock.locked_by_session_id != v_session.id THEN
+      RETURN json_build_object('allowed', false, 'reason', 'occupied');
+    END IF;
+  END IF;
+
+  -- 5. Numéro de séquence pour l'alternance initial/extension
+  SELECT COUNT(*) + 1 INTO v_seq
+  FROM activations
+  WHERE session_id = v_session.id AND resource = p_resource;
+
+  -- 6. Configuration du temps pour ce type de véhicule
+  SELECT * INTO v_config FROM vehicle_type_config
+  WHERE vehicle_type = v_session.vehicle_type;
+
+  IF NOT FOUND THEN
+    RETURN json_build_object('allowed', false, 'reason', 'missing_vehicle_config');
+  END IF;
+
+  -- 7. Alternance : impair -> initial, pair -> extension
+  IF p_resource = 'karcher' THEN
+    v_duration := CASE WHEN v_seq % 2 = 1
+      THEN v_config.karcher_initial_seconds
+      ELSE v_config.karcher_extension_seconds
+    END;
+  ELSE
+    v_duration := CASE WHEN v_seq % 2 = 1
+      THEN v_config.vacuum_initial_seconds
+      ELSE v_config.vacuum_extension_seconds
+    END;
+  END IF;
+
+  IF v_duration IS NULL THEN
+    RETURN json_build_object('allowed', false, 'reason', 'resource_not_available_for_bay');
+  END IF;
+
+  -- 8. Enregistrement de l'activation (start_time généré par le serveur)
+  INSERT INTO activations (session_id, resource, duration_planned_seconds, sequence_number, start_time)
+  VALUES (v_session.id, p_resource, v_duration, v_seq, now())
+  RETURNING id INTO v_activation_id;
+
+  -- 9. Compteurs et seuils d'alerte (Kärcher: 5e activation, Aspirateur: 3e)
+  IF p_resource = 'karcher' THEN
+    UPDATE wash_sessions SET karcher_activation_count = v_seq WHERE id = v_session.id;
+    IF v_seq >= 5 THEN
+      UPDATE wash_sessions SET alert_triggered = true WHERE id = v_session.id;
     END IF;
 
-    -- Mapper la ressource et valider selon le poste
-    IF p_resource = 'karcher' THEN
-        v_mapped_resource := 'karcher';
-    ELSIF p_resource = 'vacuum' THEN
-        IF p_bay = 1 THEN
-            v_mapped_resource := 'vacuum_1';
-        ELSIF p_bay = 2 THEN
-            v_mapped_resource := 'vacuum_2';
-        ELSE
-            RETURN jsonb_build_object('allowed', false, 'reason', 'vacuum_not_available_on_bay_3');
-        END IF;
-    ELSE
-        RETURN jsonb_build_object('allowed', false, 'reason', 'invalid_resource');
+    UPDATE karcher_lock
+    SET locked_by_session_id = v_session.id,
+        locked_by_bay = p_bay,
+        locked_at = now(),
+        expires_at = now() + ((v_duration + 60) * interval '1 second')
+    WHERE id = 1;
+  ELSE
+    UPDATE wash_sessions SET vacuum_activation_count = v_seq WHERE id = v_session.id;
+    IF v_seq >= 3 THEN
+      UPDATE wash_sessions SET alert_triggered = true WHERE id = v_session.id;
     END IF;
+  END IF;
 
-    -- Vérifier s'il y a déjà une activation en cours pour cette ressource dans cette session
-    PERFORM 1
-    FROM activations
-    WHERE session_id = v_session.id AND resource = v_mapped_resource AND end_time IS NULL;
-
-    IF FOUND THEN
-        RETURN jsonb_build_object('allowed', false, 'reason', 'already_running');
-    END IF;
-
-    -- Gérer le verrou Kärcher
-    IF v_mapped_resource = 'karcher' THEN
-        SELECT locked_by_session_id, locked_by_bay, expires_at 
-        INTO v_lock_session_id, v_lock_bay, v_lock_expires
-        FROM karcher_lock
-        WHERE id = 1;
-
-        -- Si occupé par une autre session et non expiré
-        IF v_lock_session_id IS NOT NULL AND v_lock_session_id <> v_session.id AND v_lock_expires > now() THEN
-            RETURN jsonb_build_object('allowed', false, 'reason', 'occupied', 'locked_by_bay', v_lock_bay);
-        END IF;
-    END IF;
-
-    -- Calculer le numéro de séquence
-    SELECT COUNT(*) INTO v_seq_num
-    FROM activations
-    WHERE session_id = v_session.id AND resource = v_mapped_resource;
-    v_seq_num := v_seq_num + 1;
-
-    -- Récupérer la configuration de durée
-    SELECT * INTO v_config
-    FROM vehicle_type_config
-    WHERE vehicle_type = v_session.vehicle_type;
-
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('allowed', false, 'reason', 'missing_vehicle_type_config');
-    END IF;
-
-    -- Appliquer la durée (impair -> initial_seconds, pair -> extension_seconds)
-    IF v_mapped_resource = 'karcher' THEN
-        IF v_seq_num % 2 = 1 THEN
-            v_duration := v_config.karcher_initial_seconds;
-        ELSE
-            v_duration := v_config.karcher_extension_seconds;
-        END IF;
-    ELSE
-        IF v_seq_num % 2 = 1 THEN
-            v_duration := v_config.vacuum_initial_seconds;
-        ELSE
-            v_duration := v_config.vacuum_extension_seconds;
-        END IF;
-    END IF;
-
-    IF v_duration IS NULL THEN
-        RETURN jsonb_build_object('allowed', false, 'reason', 'resource_not_supported_for_vehicle_type');
-    END IF;
-
-    -- Insérer l'activation
-    INSERT INTO activations (session_id, resource, duration_planned_seconds, start_time, end_time, sequence_number)
-    VALUES (v_session.id, v_mapped_resource, v_duration, now(), NULL, v_seq_num)
-    RETURNING id INTO v_activation_id;
-
-    -- Verrouiller la ressource si Kärcher
-    IF v_mapped_resource = 'karcher' THEN
-        UPDATE karcher_lock
-        SET locked_by_session_id = v_session.id,
-            locked_by_bay = p_bay,
-            locked_at = now(),
-            expires_at = now() + (v_duration || ' seconds')::INTERVAL + INTERVAL '60 seconds'
-        WHERE id = 1;
-    END IF;
-
-    -- Incrémenter les compteurs de session et évaluer les seuils d'alerte
-    v_alert_triggered := v_session.alert_triggered;
-    IF v_mapped_resource = 'karcher' THEN
-        v_karcher_count := v_session.karcher_activation_count + 1;
-        v_vacuum_count := v_session.vacuum_activation_count;
-        IF v_karcher_count >= 5 THEN
-            v_alert_triggered := true;
-        END IF;
-    ELSE
-        v_karcher_count := v_session.karcher_activation_count;
-        v_vacuum_count := v_session.vacuum_activation_count + 1;
-        IF v_vacuum_count >= 3 THEN
-            v_alert_triggered := true;
-        END IF;
-    END IF;
-
-    UPDATE wash_sessions
-    SET karcher_activation_count = v_karcher_count,
-        vacuum_activation_count = v_vacuum_count,
-        alert_triggered = v_alert_triggered
-    WHERE id = v_session.id;
-
-    RETURN jsonb_build_object(
-        'allowed', true,
-        'duration_seconds', v_duration,
-        'activation_id', v_activation_id
-    );
+  RETURN json_build_object(
+    'allowed', true,
+    'duration_seconds', v_duration,
+    'activation_id', v_activation_id,
+    'reason', null
+  );
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 5.2 end_activation
 CREATE OR REPLACE FUNCTION end_activation(p_activation_id UUID)
@@ -437,7 +407,7 @@ CREATE POLICY update_wash_sessions ON wash_sessions FOR UPDATE TO authenticated 
 CREATE POLICY modify_vehicle_type_config ON vehicle_type_config FOR ALL TO authenticated USING (true);
 
 -- Accorder le droit d'exécution sur les fonctions RPC à public
-GRANT EXECUTE ON FUNCTION request_activation(INT, TEXT) TO public;
+GRANT EXECUTE ON FUNCTION request_activation(INT, TEXT, TEXT) TO public;
 GRANT EXECUTE ON FUNCTION end_activation(UUID) TO public;
 GRANT EXECUTE ON FUNCTION heartbeat_activation(UUID) TO public;
 GRANT EXECUTE ON FUNCTION expire_stuck_locks() TO public;
