@@ -90,12 +90,16 @@ export default function EmployeePOSPage() {
     loadActiveEmployee();
   }, []);
 
-  // Poll database for active sessions every 3 seconds
+  // Poll database for active sessions AND kärcher lock every 3 seconds
   useEffect(() => {
     async function fetchPolledData() {
       try {
-        const sessions = await getActiveSessions();
+        const [sessions, lock] = await Promise.all([
+          getActiveSessions(),
+          getKarcherLock(),
+        ]);
         setActiveSessions(sessions);
+        setKarcherLock(lock);
       } catch (err) {
         console.warn('Polling error (Supabase might be sleeping):', err);
       }
@@ -106,13 +110,8 @@ export default function EmployeePOSPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Realtime subscription for Kärcher lock status
+  // Realtime subscription for Kärcher lock status (instant updates when Realtime is enabled)
   useEffect(() => {
-    // Fetch initial lock state
-    getKarcherLock()
-      .then((lock) => setKarcherLock(lock))
-      .catch((err) => console.warn('Initial Kärcher lock fetch error:', err));
-
     const channel = supabase
       .channel('karcher-lock-status')
       .on(
