@@ -579,6 +579,16 @@ export async function requestKarcherRouting(bay: number, sessionId: string): Pro
   return !!data;
 }
 
+// Expire stuck Kärcher locks server-side
+export async function expireStuckLocks(): Promise<number> {
+  const { data, error } = await supabase.rpc('expire_stuck_locks');
+  if (error) {
+    console.warn('Error calling expire_stuck_locks:', error.message);
+    return 0;
+  }
+  return Number(data || 0);
+}
+
 // Fetch detailed activations list for a given wash session
 export async function getActivationsForSession(sessionId: string): Promise<Activation[]> {
   const { data, error } = await supabase

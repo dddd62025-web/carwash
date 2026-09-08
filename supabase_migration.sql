@@ -312,14 +312,53 @@ RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+DECLARE
+  v_lock        RECORD;
+  v_session     RECORD;
+  v_has_active  BOOLEAN;
+  v_duration    INT;
 BEGIN
-    UPDATE karcher_lock
-    SET locked_by_session_id = p_session_id,
-        locked_by_bay = p_bay,
-        locked_at = now(),
-        expires_at = now() + INTERVAL '60 seconds'
-    WHERE id = 1;
-    RETURN true;
+  -- Get current lock state
+  SELECT * INTO v_lock FROM karcher_lock WHERE id = 1;
+
+  -- Check if badge is actively tagged for the lock holder
+  IF v_lock.locked_by_session_id IS NOT NULL
+     AND v_lock.locked_by_session_id <> p_session_id
+  THEN
+    SELECT EXISTS (
+      SELECT 1 FROM activations
+      WHERE session_id = v_lock.locked_by_session_id
+        AND resource = 'karcher'
+        AND end_time IS NULL
+    ) INTO v_has_active;
+
+    -- Badge is tagged on another post -> refuse
+    IF v_has_active THEN
+      RETURN false;
+    END IF;
+  END IF;
+
+  -- Get the requesting session's vehicle type
+  SELECT * INTO v_session FROM wash_sessions WHERE id = p_session_id;
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  -- Get duration from vehicle_type_config
+  SELECT karcher_initial_seconds INTO v_duration
+  FROM vehicle_type_config
+  WHERE vehicle_type = v_session.vehicle_type;
+
+  -- Fallback to 60s if config is missing
+  IF v_duration IS NULL THEN v_duration := 60; END IF;
+
+  -- Acquire lock
+  UPDATE karcher_lock
+  SET locked_by_session_id = p_session_id,
+      locked_by_bay        = p_bay,
+      locked_at            = now(),
+      expires_at           = now() + (v_duration || ' seconds')::INTERVAL
+  WHERE id = 1;
+
+  RETURN true;
 END;
 $$;
 

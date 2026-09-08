@@ -6,6 +6,7 @@ import {
   getAppUsers, 
   getActiveSessions, 
   getKarcherLock, 
+  expireStuckLocks,
   createWashSession, 
   completeWashSession, 
   requestKarcherRouting,
@@ -90,10 +91,11 @@ export default function EmployeePOSPage() {
     loadActiveEmployee();
   }, []);
 
-  // Poll database for active sessions AND kärcher lock every 3 seconds
+  // Poll database for active sessions AND kärcher lock every 3 seconds (and expire stuck locks)
   useEffect(() => {
     async function fetchPolledData() {
       try {
+        await expireStuckLocks();
         const [sessions, lock] = await Promise.all([
           getActiveSessions(),
           getKarcherLock(),
@@ -109,6 +111,19 @@ export default function EmployeePOSPage() {
     const interval = setInterval(fetchPolledData, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Timer helper functions for Kärcher lock countdown
+  const getRemainingLockSeconds = (expiresAtStr: string | null | undefined) => {
+    if (!expiresAtStr) return 0;
+    const diff = Math.ceil((new Date(expiresAtStr).getTime() - Date.now()) / 1000);
+    return diff > 0 ? diff : 0;
+  };
+
+  const formatSeconds = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   // Realtime subscription for Kärcher lock status (instant updates when Realtime is enabled)
   useEffect(() => {
@@ -208,9 +223,12 @@ export default function EmployeePOSPage() {
   const handleRequestKarcher = async (bay: number, sessionId: string) => {
     try {
       setRoutingBay(bay);
-      await requestKarcherRouting(bay, sessionId);
+      const success = await requestKarcherRouting(bay, sessionId);
       const updatedLock = await getKarcherLock();
       setKarcherLock(updatedLock);
+      if (!success) {
+        alert(`Le Kärcher est actuellement verrouillé par le Poste ${updatedLock?.locked_by_bay || 'autre'}. Impossible de prendre la main tant que le badge est actif.`);
+      }
     } catch (err) {
       console.error('Failed to request Kärcher routing:', err);
       alert('Erreur lors de la demande de routage Kärcher.');
@@ -413,14 +431,28 @@ export default function EmployeePOSPage() {
           <div className="pt-2">
             <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1.5">Statut Kärcher (Partagé)</p>
             {isKarcherLockOwned ? (
-              <div className="flex items-center space-x-2 bg-green-50 border border-green-200 p-3 rounded-xl text-green-700 text-xs font-bold">
-                <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping shrink-0" />
-                <span>Kärcher connecté & actif sur votre poste</span>
+              <div className="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-xl text-green-700 text-xs font-bold">
+                <div className="flex items-center space-x-2">
+                  <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping shrink-0" />
+                  <span>Kärcher connecté & actif sur votre poste</span>
+                </div>
+                {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                  <span className="bg-green-200 text-green-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
+                    ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                  </span>
+                )}
               </div>
             ) : isKarcherLockBusy ? (
-              <div className="flex items-center space-x-2 bg-amber-50 border border-amber-250 p-3 rounded-xl text-amber-700 text-xs font-bold">
-                <span className="w-2.5 h-2.5 bg-amber-500 rounded-full shrink-0" />
-                <span>Occupé par le Poste {karcherBusyBay}</span>
+              <div className="flex items-center justify-between bg-amber-50 border border-amber-250 p-3 rounded-xl text-amber-700 text-xs font-bold">
+                <div className="flex items-center space-x-2">
+                  <span className="w-2.5 h-2.5 bg-amber-500 rounded-full shrink-0" />
+                  <span>Occupé par le Poste {karcherBusyBay}</span>
+                </div>
+                {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                  <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
+                    ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                  </span>
+                )}
               </div>
             ) : (
               <div className="flex items-center space-x-2 bg-gray-50 border border-gray-200 p-3 rounded-xl text-gray-650 text-xs font-bold">
@@ -677,14 +709,28 @@ export default function EmployeePOSPage() {
                   <div className="pt-2">
                     <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1.5">Statut Kärcher (Partagé)</p>
                     {karcherLock?.locked_by_session_id === sessionP3.id ? (
-                      <div className="flex items-center space-x-2 bg-green-50 border border-green-200 p-3 rounded-xl text-green-700 text-xs font-bold">
-                        <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping shrink-0" />
-                        <span>Kärcher connecté & actif sur votre poste</span>
+                      <div className="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-xl text-green-700 text-xs font-bold">
+                        <div className="flex items-center space-x-2">
+                          <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping shrink-0" />
+                          <span>Kärcher connecté & actif sur votre poste</span>
+                        </div>
+                        {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                          <span className="bg-green-200 text-green-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
+                            ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                          </span>
+                        )}
                       </div>
                     ) : karcherLock?.locked_by_session_id ? (
-                      <div className="flex items-center space-x-2 bg-amber-50 border border-amber-250 p-3 rounded-xl text-amber-700 text-xs font-bold">
-                        <span className="w-2.5 h-2.5 bg-amber-500 rounded-full shrink-0" />
-                        <span>Occupé par le Poste {karcherLock.locked_by_bay}</span>
+                      <div className="flex items-center justify-between bg-amber-50 border border-amber-250 p-3 rounded-xl text-amber-700 text-xs font-bold">
+                        <div className="flex items-center space-x-2">
+                          <span className="w-2.5 h-2.5 bg-amber-500 rounded-full shrink-0" />
+                          <span>Occupé par le Poste {karcherLock.locked_by_bay}</span>
+                        </div>
+                        {getRemainingLockSeconds(karcherLock?.expires_at) > 0 && (
+                          <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded text-[11px] font-extrabold ml-1">
+                            ⏱️ {formatSeconds(getRemainingLockSeconds(karcherLock?.expires_at))}
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center space-x-2 bg-gray-50 border border-gray-200 p-3 rounded-xl text-gray-650 text-xs font-bold">
